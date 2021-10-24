@@ -1,99 +1,83 @@
 package main
 
 import (
-	"fmt"
+	"flag"
 	"os"
-	"strings"
-	"time"
 
-	"github.com/apognu/gocal"
+	log "github.com/sirupsen/logrus"
 )
 
-type Category struct {
-	Name      string
-	Matcher   string
-	Duration  float64
-	Attendees int
+var (
+	email   *string
+	icsPath *string
+	start   *string
+	end     *string
+	debug   *bool
+	format  *string
+)
+
+const (
+	formatCsv   = "csv"
+	formatAscii = "ascii"
+)
+
+func isFlagPassed(name string) bool {
+	found := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			found = true
+		}
+	})
+	return found
 }
 
-func (c *Category) isMatching(e *gocal.Event) bool {
-	if len(c.Matcher) > 0 && !strings.Contains(e.Summary, c.Matcher) {
-		return false
+func init() {
+	icsPath = flag.String("path", "", "path to the .ics file")
+	email = flag.String("email", "", "example@example.com")
+	start = flag.String("start", "", "17 Oct 21 00:00 EET")
+	end = flag.String("end", "", "17 Oct 21 00:00 EET")
+	debug = flag.Bool("debug", false, "turn on debug output")
+	format = flag.String("format", formatCsv, "format the output as csv or ascii")
+
+	flag.Parse()
+
+	log.SetOutput(os.Stdout)
+
+	if *debug {
+		log.SetLevel(log.DebugLevel)
+	} else {
+		log.SetLevel(log.WarnLevel)
 	}
 
-	if c.Attendees != len(e.Attendees) {
-		return false
+	if !isFlagPassed("path") {
+		log.Fatal("Please specify and .ics path")
 	}
 
-	return true
+	if !isFlagPassed("email") {
+		log.Fatal("Please specify an e-mail address")
+	}
+
+	if !isFlagPassed("start") {
+		log.Fatal("Please specify a start date")
+	}
+
+	if !isFlagPassed("end") {
+		log.Fatal("Please specify an end date")
+	}
 }
 
 func main() {
-	var categories = []Category{
-		Category{
-			Name:      "Information Processing",
-			Matcher:   "Information Processing",
-			Attendees: 0,
-		},
-		Category{
-			Name:      "Engineering",
-			Matcher:   "Engineering",
-			Attendees: 0,
-		},
-		Category{
-			Name:      "Ops",
-			Matcher:   "Ops",
-			Attendees: 0,
-		},
-		Category{
-			Name:      "Strategic",
-			Matcher:   "Strategic",
-			Attendees: 0,
-		},
-		Category{
-			Name:      "Learning",
-			Matcher:   "Learning",
-			Attendees: 0,
-		},
-		Category{
-			Name:      "Team", // should also match events with 2 or more attendees
-			Matcher:   "Team",
-			Attendees: 0,
-		},
-		Category{
-			Name:      "1:1s", // Management
-			Attendees: 2,
-		},
-		Category{
-			Name:      "Recruiting", // recruiting@angel.co
-			Matcher:   "Recruiting",
-			Attendees: 0,
-		},
-	}
+	categories := parseCategories()
+	icsEvents := parseIcs(*icsPath, *start, *end)
 
-	// TODO: make it an input
-	f, _ := os.Open("/Users/vesln/Downloads/ves@angel.co.ical/ves@angel.co.ics")
-	defer f.Close()
+	events := makeEvents(icsEvents, categories)
 
-	// TODO: make it an input
-	start, end := time.Now().Add(-7*24*time.Hour), time.Now()
-
-	c := gocal.NewParser(f)
-	c.Start, c.End = &start, &end
-	c.Parse()
-
-	durations := make(map[string]float64)
-
-	for _, e := range c.Events {
-		for i, _ := range categories {
-			if categories[i].isMatching(&e) {
-				durations[categories[i].Name] += e.End.Sub(*e.Start).Minutes()
-				break
-			}
-		}
-	}
-
-	for name, duration := range durations {
-		fmt.Println(name, duration, "minutes")
+	switch *format {
+	case formatAscii:
+		printAscii(events)
+	case formatCsv:
+		printCsv(events)
+	default:
+		log.Fatal("Unkonwn format")
 	}
 }
